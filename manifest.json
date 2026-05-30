@@ -1,0 +1,54 @@
+{
+  "_description": "Index des fiches plantes actives — Bloom by BotaniK. Mis à jour automatiquement par agent_archiviste.py.",
+  "schema_version": "1.0",
+  "last_updated": null,
+  "total": 0,
+  "pipeline": {
+    "inbox": "02_LIBRARY/plants/inbox/",
+    "active": "02_LIBRARY/plants/active/",
+    "archive": "08_ARCHIVE/retired_plant_fiches/",
+    "queue": "agents_queue.json",
+    "logs": "07_LOGS/update_log.md"
+  },
+  "naming_convention": {
+    "pattern": "NOM_PLANTE_BLOOM_vN.md",
+    "example": "ASHWAGANDHA_BLOOM_v1.md",
+    "required_yaml_fields": [
+      "plant_name",
+      "version",
+      "review_status",
+      "last_update"
+    ],
+    "review_statuses": [
+      "collecting",
+      "scientific_review",
+      "validated",
+      "archived",
+      "schema_error",
+      "error_file_not_found"
+    ]
+  },
+  "agents": [
+    {
+      "id": "maitre",
+      "script": "scripts/agent_maitre.py",
+      "role": "Arbitre les priorités, trie la queue, détecte les conflits"
+    },
+    {
+      "id": "veilleur",
+      "script": "scripts/agent_veilleur.py",
+      "role": "Collecte les sources, enrichit le brouillon, propose synergies et signaux faibles"
+    },
+    {
+      "id": "validateur",
+      "script": "scripts/agent_validateur.py",
+      "role": "Classe les preuves, valide ou rejette les claims scientifiques"
+    },
+    {
+      "id": "archiviste",
+      "script": "scripts/agent_archiviste.py",
+      "role": "Publie en active/, archive les anciennes versions, met à jour ce manifest"
+    }
+  ],
+  "plants": []
+}
