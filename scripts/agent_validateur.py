@@ -10,7 +10,7 @@ Rôle :
       * RCT (essais contrôlés randomisés)
       * Méta-analyses et revues systématiques
       * Études observationnelles
-      * Données précliniques (in vitro, animal)
+      * Données précliniques (in vitro, animale)
       * Tradition / usage ethnobotanique
   - Valider ou rejeter chaque claim
   - Identifier ce qui doit être corrigé avant publication
@@ -21,7 +21,9 @@ NOTE : Le bloc LLM_CALL est le point d'intégration avec votre modèle AI.
 """
 
 import json
+import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,13 +31,17 @@ ROOT = Path(__file__).resolve().parent.parent
 QUEUE_PATH = ROOT / "agents_queue.json"
 LOG_PATH = ROOT / "07_LOGS" / "update_log.md"
 
+DRAFTS_DIR = ROOT / "02_LIBRARY" / "plants" / "drafts"
+VALIDATED_DIR = ROOT / "02_LIBRARY" / "plants" / "validated"
+INBOX_DIR = ROOT / "02_LIBRARY" / "plants" / "inbox"
+
 # Niveaux de preuve acceptés (du plus fort au plus faible)
 EVIDENCE_LEVELS = [
     "RCT",
-    "meta-analyse",
-    "revue systematique",
-    "etude observationnelle",
-    "preclinique",
+    "méta-analyse",
+    "revue systématique",
+    "étude observationnelle",
+    "préclinique",
     "tradition",
     "avis expert",
 ]
@@ -63,33 +69,52 @@ def log_entry(message: str) -> None:
 
 def update_front_matter_status(content: str, new_status: str) -> str:
     pattern = r'(review_status:\s*)[^\n]+'
-    replacement = f'\\g<1>{new_status}'
     if re.search(pattern, content):
-        return re.sub(pattern, replacement, content)
+        return re.sub(pattern, f'\\g<1>{new_status}', content)
     return content
 
 
 def update_last_update(content: str) -> str:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     pattern = r'(last_update:\s*)[^\n]+'
-    replacement = f'\\g<1>{today}'
     if re.search(pattern, content):
-        return re.sub(pattern, replacement, content)
+        return re.sub(pattern, f'\\g<1>{today}', content)
     return content
 
 
 def llm_validate(plant_name: str, content: str) -> tuple:
     """
-    POINT D'INTÉGRATION LLM — à remplacer par votre appel API réel.
+    POINT D'INTÉGRATION CLAUDE — validation scientifique via API Anthropic.
 
-    Retour :
-      (validated_content: str, is_validated: bool)
+    Pour activer : décommenter le bloc ci-dessous et ajouter ANTHROPIC_API_KEY
+    dans les secrets GitHub (Settings > Secrets and variables > Actions).
 
-    Exemple d'intégration :
-      Le LLM reçoit la fiche enrichie et doit retourner :
-      - La fiche annotée avec niveaux de preuve
-      - Un verdict : validated / return_to_collecting
-      - Les corrections à apporter si rejet
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+    prompt = f'''
+    Tu es un expert en phytothérapie et médecine botanique.
+    Voici une fiche plante enrichie à valider scientifiquement :
+
+    {content}
+
+    Pour la plante {plant_name}, analyse chaque claim et :
+    1. Classe les preuves par niveau d'évidence (RCT, méta-analyse, revue systématique,
+       étude observationnelle, préclinique, tradition, avis expert)
+    2. Valide ou rejette chaque claim selon les preuves disponibles
+    3. Identifie les corrections à apporter avant publication
+    4. Rends un verdict global : validé (prêt pour publication) ou rejeté (retour au veilleur)
+
+    Retourne la fiche complète en Markdown avec la section ## Rapport de validation scientifique
+    remplie, et le verdict global en fin de fiche.
+    '''
+    message = client.messages.create(
+        model='claude-opus-4-5',
+        max_tokens=4096,
+        messages=[{'role': 'user', 'content': prompt}]
+    )
+    validated_content = message.content[0].text
+    is_validated = 'verdict global : validé' in validated_content.lower()
+    return validated_content, is_validated
     """
     # Placeholder : ajoute la section de validation avec un message indicatif
     if VALIDATION_SECTION not in content:
@@ -97,11 +122,11 @@ def llm_validate(plant_name: str, content: str) -> tuple:
 
 {VALIDATION_SECTION}
 
-| Claim | Niveau de preuve | Verdict | Commentaire |
+| Claim | Niveau de preuve | Verdict | Commentaires |
 |-------|-----------------|---------|-------------|
-| TODO  | à déterminer    | Pending | À compléter par le Validateur pour {plant_name} |
+| À FAIRE | à déterminer | En attente | À compléter par le Validateur pour {plant_name} |
 
-**Verdict global :** Pending — revue manuelle requise.
+**Verdict global :** En attente — revue manuelle requise.
 
 **Corrections requises avant publication :**
 - [ ] TODO : à lister par le validateur.
@@ -112,36 +137,47 @@ def llm_validate(plant_name: str, content: str) -> tuple:
 
 
 def process_task(task: dict) -> dict:
-    file_path = ROOT / task["file_path"]
+    src_path = ROOT / task["file_path"]
     plant_name = task["plant_name"]
 
-    if not file_path.exists():
-        print(f"[VALIDATEUR][ERROR] Fichier introuvable : {file_path}")
+    if not src_path.exists():
+        print(f"[VALIDATEUR][ERROR] Fichier introuvable : {src_path}")
         task["review_status"] = "error_file_not_found"
         return task
 
-    content = file_path.read_text(encoding="utf-8")
-    print(f"[VALIDATEUR] Validation de {file_path.name} ({plant_name})...")
+    content = src_path.read_text(encoding="utf-8")
+    print(f"[VALIDATEUR] Validation de {src_path.name} ({plant_name})...")
 
     validated_content, is_validated = llm_validate(plant_name, content)
 
     if is_validated:
         new_status = "validated"
         next_agent = "archiviste"
-        print(f"[VALIDATEUR] {file_path.name} → VALIDÉ (transmis à l'archiviste)")
+        dest_dir = VALIDATED_DIR
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / src_path.name
+        validated_content = update_front_matter_status(validated_content, new_status)
+        validated_content = update_last_update(validated_content)
+        src_path.write_text(validated_content, encoding="utf-8")
+        shutil.move(str(src_path), str(dest_path))
+        task["file_path"] = str(dest_path.relative_to(ROOT))
+        print(f"[VALIDATEUR] {src_path.name} → validated/ | VALIDÉ (transmis à l'archiviste)")
+        log_entry(f"Validé : drafts/{src_path.name} → validated/ | {plant_name}")
     else:
         new_status = "collecting"
         next_agent = "veilleur"
-        print(f"[VALIDATEUR] {file_path.name} → REJETÉ — retour au veilleur")
-
-    validated_content = update_front_matter_status(validated_content, new_status)
-    validated_content = update_last_update(validated_content)
-    file_path.write_text(validated_content, encoding="utf-8")
+        INBOX_DIR.mkdir(parents=True, exist_ok=True)
+        dest_path = INBOX_DIR / src_path.name
+        validated_content = update_front_matter_status(validated_content, new_status)
+        validated_content = update_last_update(validated_content)
+        src_path.write_text(validated_content, encoding="utf-8")
+        shutil.move(str(src_path), str(dest_path))
+        task["file_path"] = str(dest_path.relative_to(ROOT))
+        print(f"[VALIDATEUR] {src_path.name} → inbox/ | REJETÉ — retour au veilleur")
+        log_entry(f"Rejeté : {src_path.name} → inbox/ | {plant_name} — retour au veilleur")
 
     task["current_agent"] = next_agent
     task["review_status"] = new_status
-
-    log_entry(f"{file_path.name} | {plant_name} → {new_status} | prochain : {next_agent}")
     return task
 
 
