@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bibliothèque des Plantes — Bloom by BotaniK</title>
+  <meta name="description" content="Découvrez notre bibliothèque de plantes médicinales : bienfaits, précautions, synergies et protocoles homostatiques.">
+  <link rel="stylesheet" href="../styles/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet">
+  <script>
+    window.__BLOOM_MANIFEST__ = {{BLOOM_MANIFEST}};
+  </script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <a href="https://bloombybotanik.com" class="logo">
+        <span class="logo-text">Bloom by BotaniK</span>
+        <span class="logo-badge">Bibliothèque</span>
+      </a>
+      <nav class="header-nav">
+        <a href="https://blog.bloombybotanik.com">Blog</a>
+        <a href="https://bloombybotanik.com/produits">Produits</a>
+      </nav>
+    </div>
+  </header>
+  <main class="app-main">
+    <section class="hero">
+      <h1>Bibliothèque des Plantes</h1>
+      <p class="hero-subtitle">Chaque plante, analysée selon la science, la pratique et la vision Bloom.</p>
+    </section>
+    <section class="search-section">
+      <div class="search-bar">
+        <input
+          type="text"
+          id="search-input"
+          placeholder="Rechercher une plante, un bienfait, une catégorie..."
+          autocomplete="off"
+        />
+        <button id="search-clear" class="search-clear" aria-label="Effacer">✕</button>
+      </div>
+      <div class="filters">
+        <button class="filter-btn active" data-filter="all">Toutes</button>
+        <button class="filter-btn" data-filter="adaptogene">Adaptogènes</button>
+        <button class="filter-btn" data-filter="anti-inflammatoire">Anti-inflammatoire</button>
+        <button class="filter-btn" data-filter="immunitaire">Immunitaire</button>
+        <button class="filter-btn" data-filter="digestif">Digestif</button>
+        <button class="filter-btn" data-filter="nerveux">Système nerveux</button>
+        <button class="filter-btn" data-filter="hormonal">Hormonal</button>
+      </div>
+    </section>
+    <section class="results-section">
+      <div class="results-meta">
+        <span id="results-count">Chargement...</span>
+      </div>
+      <div class="plants-grid" id="plants-grid">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Chargement de la bibliothèque...</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <!-- Modal fiche plante -->
+  <div id="plant-modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-overlay" id="modal-overlay"></div>
+    <div class="modal-content" id="modal-content">
+      <button class="modal-close" id="modal-close" aria-label="Fermer">×</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+  <footer class="app-footer">
+    <div class="footer-inner">
+      <p>© 2026 Bloom by BotaniK — Tous droits réservés</p>
+      <p class="footer-disclaimer">Ces informations sont à titre éducatif et ne remplacent pas un avis médical.</p>
+    </div>
+  </footer>
+  <script src="../src/data_loader.js"></script>
+  <script src="../components/PlantCard.js"></script>
+  <script src="../src/app.js"></script>
+</body>
+</html>
