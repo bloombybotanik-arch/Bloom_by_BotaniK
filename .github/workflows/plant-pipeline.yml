@@ -1,0 +1,92 @@
+name: Plant Fiches Pipeline Bloom by BotaniK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '02_LIBRARY/plants/inbox/**.md'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Forcer execution meme sans nouvelles fiches'
+        required: false
+        default: 'false'
+        type: boolean
+  schedule:
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  plant-pipeline:
+    name: Pipeline agents Bloom
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Set script permissions
+        run: chmod +x scripts/*.sh
+
+      - name: Run plant pipeline
+        run: |
+          echo "============================="
+          echo "BLOOM PIPELINE"
+          echo "============================="
+          python scripts/scan_bloom_fiches.py
+          python scripts/agent_maitre.py
+          python scripts/agent_veilleur.py
+          python scripts/agent_validateur.py
+          python scripts/agent_archiviste.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Commit pipeline results
+        run: |
+          git config user.name "Bloom Bot"
+          git config user.email "bot@bloombybotanik.com"
+          git add \
+            02_LIBRARY/plants/active/ \
+            02_LIBRARY/plants/inbox/ \
+            08_ARCHIVE/retired_plant_fiches/ \
+            07_LOGS/update_log.md \
+            agents_queue.json \
+            manifest.json || true
+          if git diff --staged --quiet; then
+            echo "Aucun changement a commiter."
+          else
+            git commit -m "chore(pipeline): traitement automatique des fiches"
+            git push
+          fi
+
+      - name: Pipeline summary
+        if: always()
+        run: |
+          echo "## Bloom Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Dossier | Contenu |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
+          INBOX=$(ls 02_LIBRARY/plants/inbox/*.md 2>/dev/null | wc -l)
+          ACTIVE=$(ls 02_LIBRARY/plants/active/*.md 2>/dev/null | wc -l)
+          ARCH=$(ls 08_ARCHIVE/retired_plant_fiches/*.md 2>/dev/null | wc -l)
+          echo "| inbox | $INBOX fichier(s) restant(s) |" >> $GITHUB_STEP_SUMMARY
+          echo "| active | $ACTIVE fiche(s) active(s) |" >> $GITHUB_STEP_SUMMARY
+          echo "| archive | $ARCH version(s) archivee(s) |" >> $GITHUB_STEP_SUMMARY
