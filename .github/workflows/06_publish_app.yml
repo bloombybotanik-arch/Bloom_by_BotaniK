@@ -4,18 +4,23 @@
 # =================================================================
 #
 # Déclencheurs :
-#   - push sur 03_BASE_DE_DONNEES/plants.json (mise à jour des données)
-#   - push sur 06_APP_BIBLIOTHEQUE/** (mise à jour du code app)
-#   - workflow_dispatch (déclenchement manuel)
+# - push sur 03_BASE_DE_DONNEES/plants.json (mise à jour des données)
+# - push sur 06_APP_BIBLIOTHEQUE/** (mise à jour du code app)
+# - push sur 05_AUTOMATION/scripts/publish_app_bundle.py (mise à jour du script)
+# - workflow_dispatch (déclenchement manuel)
 #
 # Ce workflow :
-#   1. Valide l'existence de plants.json
-#   2. Exécute publish_app_bundle.py pour injecter les données dans l'app
-#   3. Commit le bundle mis à jour dans 06_APP_BIBLIOTHEQUE/data/
-#   4. Écrit un résumé dans GITHUB_STEP_SUMMARY
+# 1. Valide l'existence de plants.json
+# 2. Exécute publish_app_bundle.py :
+#    - Valide et enrichit les données
+#    - Génère version-manifest.json (double écriture DB + data)
+#    - Rend index.template.html -> index.html avec manifest injecté
+#    - Génère app-version.js
+#    - Écrit le log dans 07_LOGS/app_publish_log.md
+# 3. Commit tous les artefacts générés
+# 4. Écrit un résumé dans GITHUB_STEP_SUMMARY
 #
 # =================================================================
-
 name: 06_publish_app
 
 on:
@@ -23,6 +28,7 @@ on:
     paths:
       - '03_BASE_DE_DONNEES/plants.json'
       - '06_APP_BIBLIOTHEQUE/**'
+      - '05_AUTOMATION/scripts/publish_app_bundle.py'
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -36,6 +42,7 @@ permissions:
 env:
   PLANTS_JSON: 03_BASE_DE_DONNEES/plants.json
   APP_DATA_DIR: 06_APP_BIBLIOTHEQUE/data
+  APP_PUBLIC_DIR: 06_APP_BIBLIOTHEQUE/public
   SCRIPTS_DIR: 05_AUTOMATION/scripts
   LOG_PATH: 07_LOGS/app_publish_log.md
 
@@ -57,8 +64,9 @@ jobs:
           if [ ! -f "$PLANTS_JSON" ]; then
             echo "status=missing" >> $GITHUB_OUTPUT
             echo "::warning::plants.json introuvable dans $PLANTS_JSON"
+            exit 1
           else
-            COUNT=$(python3 -c "import json,sys; d=json.load(open('$PLANTS_JSON')); print(len(d) if isinstance(d,list) else len(d.get('plants',[])))") 2>/dev/null || COUNT=0
+            COUNT=$(python3 -c "import json,sys; d=json.load(open('$PLANTS_JSON')); print(len(d) if isinstance(d,list) else len(d.get('plants',[])))" 2>/dev/null || echo 0)
             echo "status=ok" >> $GITHUB_OUTPUT
             echo "count=$COUNT" >> $GITHUB_OUTPUT
             echo "::notice::plants.json trouvé — $COUNT plantes"
@@ -69,46 +77,50 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installer les dépendances Python
+      - name: Créer les dossiers nécessaires
         run: |
-          pip install --quiet anthropic python-dotenv
+          mkdir -p $APP_DATA_DIR
+          mkdir -p 07_LOGS
 
-      - name: Créer le dossier data si absent
-        run: mkdir -p $APP_DATA_DIR
-
-      - name: Injecter plants.json dans l'app (publish_app_bundle.py)
+      - name: Exécuter publish_app_bundle.py
         id: publish
         run: |
-          if [ -f "$SCRIPTS_DIR/publish_app_bundle.py" ]; then
-            python3 $SCRIPTS_DIR/publish_app_bundle.py
-            echo "published=true" >> $GITHUB_OUTPUT
-          else
-            echo "::notice::publish_app_bundle.py absent — copie directe de plants.json"
-            cp $PLANTS_JSON $APP_DATA_DIR/plants.json
-            echo "published=true" >> $GITHUB_OUTPUT
-          fi
+          python3 $SCRIPTS_DIR/publish_app_bundle.py
+          echo "published=true" >> $GITHUB_OUTPUT
 
-      - name: Commit du bundle mis à jour
+      - name: Commit de tous les artefacts générés
         if: steps.publish.outputs.published == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Stager tous les fichiers générés
           git add $APP_DATA_DIR/
+          git add $APP_PUBLIC_DIR/index.html
+          git add 03_BASE_DE_DONNEES/version-manifest.json
+          git add 07_LOGS/
           if git diff --staged --quiet; then
             echo "Aucun changement à committer."
           else
-            git commit -m "chore: mise à jour bundle app — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            VERSION=$(python3 -c "import json; m=json.load(open('03_BASE_DE_DONNEES/version-manifest.json')); print(m.get('app_version','?'))")
+            BUILD=$(python3 -c "import json; m=json.load(open('03_BASE_DE_DONNEES/version-manifest.json')); print(m.get('build_id','?'))")
+            git commit -m "chore: publish app bundle v${VERSION} / build ${BUILD}"
             git push
           fi
 
       - name: Résumé du workflow
         if: always()
         run: |
+          VERSION=$(python3 -c "import json; m=json.load(open('03_BASE_DE_DONNEES/version-manifest.json')); print(m.get('app_version','?'))" 2>/dev/null || echo '?')
+          PLANTS_VER=$(python3 -c "import json; m=json.load(open('03_BASE_DE_DONNEES/version-manifest.json')); print(m.get('plants_version','?'))" 2>/dev/null || echo '?')
+          BUILD=$(python3 -c "import json; m=json.load(open('03_BASE_DE_DONNEES/version-manifest.json')); print(m.get('build_id','?'))" 2>/dev/null || echo '?')
           echo "## App Bibliothèque — Rapport de publication" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Champ | Valeur |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | ${{ steps.publish.outputs.published == 'true' && 'ok' || 'warning' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.publish.outputs.published == 'true' && '✅ OK' || '⚠️ Warning' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| App Version | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Plants Version | ${PLANTS_VER} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build ID | ${BUILD} |" >> $GITHUB_STEP_SUMMARY
           echo "| Plantes dans plants.json | ${{ steps.check_data.outputs.count || '?' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Date | $(date -u '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
           echo "| Branche | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
