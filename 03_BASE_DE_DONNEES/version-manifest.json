@@ -1,7 +1,8 @@
 {
-  "app_version": "2026.05.30-10",
-  "plants_version": "2026.05.30-10",
-  "generated_at": "2026-05-30T10:25:00+02:00",
+  "app_version": "2026.05.30-11",
+  "plants_version": "2026.05.30-11",
+  "generated_at": "2026-05-30T11:01:00+02:00",
   "source_commit": "placeholder",
-  "build_id": "bloom-20260530-10"
+  "build_id": "bloom-20260530-11",
+  "data_url": "/06_APP_BIBLIOTHEQUE/data/plants.json?v=2026.05.30-11"
 }
