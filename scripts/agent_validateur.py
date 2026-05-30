@@ -16,10 +16,9 @@ Rôle :
   - Identifier ce qui doit être corrigé avant publication
   - Mettre à jour review_status → 'validated' ou retour à 'collecting'
   - Router vers l'agent archiviste (agent 3)
-
-NOTE : Le bloc LLM_CALL est le point d'intégration avec votre modèle AI.
 """
 
+import anthropic
 import json
 import os
 import re
@@ -85,28 +84,25 @@ def update_last_update(content: str) -> str:
 def llm_validate(plant_name: str, content: str) -> tuple:
     """
     POINT D'INTÉGRATION CLAUDE — validation scientifique via API Anthropic.
-
-    Pour activer : décommenter le bloc ci-dessous et ajouter ANTHROPIC_API_KEY
-    dans les secrets GitHub (Settings > Secrets and variables > Actions).
-
-    import anthropic
+    Utilise ANTHROPIC_API_KEY depuis les secrets GitHub Actions.
+    """
     client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-    prompt = f'''
-    Tu es un expert en phytothérapie et médecine botanique.
-    Voici une fiche plante enrichie à valider scientifiquement :
+    prompt = f'''Tu es un expert en phytothérapie et médecine botanique.
+Voici une fiche plante enrichie à valider scientifiquement :
 
-    {content}
+{content}
 
-    Pour la plante {plant_name}, analyse chaque claim et :
-    1. Classe les preuves par niveau d'évidence (RCT, méta-analyse, revue systématique,
-       étude observationnelle, préclinique, tradition, avis expert)
-    2. Valide ou rejette chaque claim selon les preuves disponibles
-    3. Identifie les corrections à apporter avant publication
-    4. Rends un verdict global : validé (prêt pour publication) ou rejeté (retour au veilleur)
+Pour la plante {plant_name}, analyse chaque claim et :
+1. Classe les preuves par niveau d'évidence (RCT, méta-analyse, revue systématique,
+   étude observationnelle, préclinique, tradition, avis expert)
+2. Valide ou rejette chaque claim selon les preuves disponibles
+3. Identifie les corrections à apporter avant publication
+4. Rends un verdict global : validé (prêt pour publication) ou rejeté (retour au veilleur)
 
-    Retourne la fiche complète en Markdown avec la section ## Rapport de validation scientifique
-    remplie, et le verdict global en fin de fiche.
-    '''
+Retourne la fiche complète en Markdown avec la section ## Rapport de validation scientifique
+remplie, et termine obligatoirement par une ligne contenant exactement :
+"Verdict global : validé" ou "Verdict global : rejeté"
+'''
     message = client.messages.create(
         model='claude-opus-4-5',
         max_tokens=4096,
@@ -115,25 +111,6 @@ def llm_validate(plant_name: str, content: str) -> tuple:
     validated_content = message.content[0].text
     is_validated = 'verdict global : validé' in validated_content.lower()
     return validated_content, is_validated
-    """
-    # Placeholder : ajoute la section de validation avec un message indicatif
-    if VALIDATION_SECTION not in content:
-        validation_block = f"""
-
-{VALIDATION_SECTION}
-
-| Claim | Niveau de preuve | Verdict | Commentaires |
-|-------|-----------------|---------|-------------|
-| À FAIRE | à déterminer | En attente | À compléter par le Validateur pour {plant_name} |
-
-**Verdict global :** En attente — revue manuelle requise.
-
-**Corrections requises avant publication :**
-- [ ] TODO : à lister par le validateur.
-"""
-        content = content + validation_block
-    # Par défaut en mode placeholder : on valide (True)
-    return content, True
 
 
 def process_task(task: dict) -> dict:
