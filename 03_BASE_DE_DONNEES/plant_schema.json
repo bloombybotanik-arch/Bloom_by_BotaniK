@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bloombybotanik.com/schemas/plant_schema.json",
+  "title": "BloomPlant",
+  "description": "Schéma de validation d'une fiche plante Bloom by BotaniK",
+  "type": "object",
+  "required": ["id", "nom", "resume_bloom"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9\\-_]+$",
+      "description": "Identifiant unique URL-safe (slug) de la plante"
+    },
+    "nom": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 100,
+      "description": "Nom commun français de la plante"
+    },
+    "nom_latin": {
+      "type": "string",
+      "minLength": 3,
+      "description": "Nom latin (genre + espèce)"
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "adaptogene",
+          "anti-inflammatoire",
+          "immunitaire",
+          "digestif",
+          "nerveux",
+          "hormonal",
+          "cardiovasculaire",
+          "hepatique",
+          "respiratoire",
+          "dermatologique",
+          "antioxydant",
+          "antimicrobien",
+          "antifongique",
+          "analgesique",
+          "diuretique",
+          "sedatif",
+          "tonique",
+          "autre"
+        ]
+      },
+      "description": "Catégories d'action de la plante"
+    },
+    "resume_bloom": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 500,
+      "description": "Résumé Bloom : positionnement scientifique + pratique de la plante"
+    },
+    "bienfaits": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "description": "Liste des principaux bienfaits démontrés"
+    },
+    "precautions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "description": "Contre-indications, interactions, précautions d'usage"
+    },
+    "synergie": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 2 },
+      "description": "Plantes ou nutriments en synergie"
+    },
+    "statut": {
+      "type": "string",
+      "enum": ["collecting", "reviewing", "validated", "needs_review", "rejected", "archived"],
+      "description": "Statut de validation dans le pipeline"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^v\\d+",
+      "description": "Version de la fiche (ex: v1, v2)"
+    },
+    "date_validation": {
+      "type": "string",
+      "format": "date",
+      "description": "Date de validation ISO 8601 (YYYY-MM-DD)"
+    },
+    "sources": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 5 },
+      "description": "Références scientifiques (DOI, URL, citation)"
+    },
+    "formes_usage": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Formes d'utilisation recommandées (infusion, extrait, poudre...)"
+    },
+    "posologie_indicative": {
+      "type": "string",
+      "description": "Posologie indicative (non médicale)"
+    },
+    "homeostasie": {
+      "type": "object",
+      "properties": {
+        "systemes_cibles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "mecanismes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "description": "Protocole homéostatique Bloom"
+    }
+  }
+}
