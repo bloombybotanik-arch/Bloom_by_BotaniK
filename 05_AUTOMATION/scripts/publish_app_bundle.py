@@ -5,170 +5,131 @@ Bloom by BotaniK — Script de publication de l'App Bibliothèque
 
 Ce script :
   1. Lit 03_BASE_DE_DONNEES/plants.json (source de vérité)
-  2. Valide et enrichit les données si nécessaire
-  3. Copie le fichier dans 06_APP_BIBLIOTHEQUE/data/plants.json
-  4. Génère un index léger plants-index.json (id, nom, categories seulement)
-  5. Génère version-manifest.json (versioning des données)
-  6. Génère app-version.js (window.BloomVersion pour le bootstrap)
-  7. Écrit un rapport dans 07_LOGS/app_publish_log.md
+  2. Valide et enrichit les données
+  3. Copie plants.json dans 06_APP_BIBLIOTHEQUE/data/
+  4. Génère plants-index.json (id, nom, categories)
+  5. Génère version-manifest.json (app_version, plants_version, build_id, source_commit)
+  6. Génère app-version.js (window.BloomVersion)
+  7. Copie version-manifest.json dans 03_BASE_DE_DONNEES/ (source de vérité)
+  8. Écrit un rapport dans 07_LOGS/app_publish_log.md
 
 Usage :
   python3 05_AUTOMATION/scripts/publish_app_bundle.py
-
-Variables d'environnement :
-  PLANTS_JSON  : chemin source (défaut : 03_BASE_DE_DONNEES/plants.json)
-  APP_DATA_DIR : dossier destination (défaut : 06_APP_BIBLIOTHEQUE/data)
-  LOG_PATH     : fichier de log (défaut : 07_LOGS/app_publish_log.md)
 """
-import json
-import os
-import sys
-import shutil
-import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
+from datetime import datetime, timezone
+import json
+import subprocess
+import sys
 
-# --- Configuration ---
-PLANTS_JSON  = Path(os.environ.get('PLANTS_JSON',  '03_BASE_DE_DONNEES/plants.json'))
-APP_DATA_DIR = Path(os.environ.get('APP_DATA_DIR', '06_APP_BIBLIOTHEQUE/data'))
-LOG_PATH     = Path(os.environ.get('LOG_PATH',     '07_LOGS/app_publish_log.md'))
+# --- Chemins absolus basés sur la position du script ---
+ROOT        = Path(__file__).resolve().parents[2]
+DB_DIR      = ROOT / "03_BASE_DE_DONNEES"
+APP_DATA_DIR = ROOT / "06_APP_BIBLIOTHEQUE" / "data"
+LOG_PATH    = ROOT / "07_LOGS" / "app_publish_log.md"
+
+APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def get_git_commit() -> str:
+def git_short_sha() -> str:
     """Retourne le hash court du dernier commit Git, ou 'unknown'"""
     try:
-        result = subprocess.run(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            capture_output=True, text=True, timeout=5
-        )
-        return result.stdout.strip() or 'unknown'
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            text=True
+        ).strip()
     except Exception:
-        return 'unknown'
+        return "unknown"
 
 
-def build_version_string() -> str:
-    """Génère une version au format YYYY.MM.DD-NN (incrémenté automatiquement)"""
-    now = datetime.now(timezone.utc)
-    date_prefix = now.strftime('%Y.%m.%d')
-    # Lire la version précédente pour incrémenter le compteur du jour
-    manifest_path = APP_DATA_DIR / 'version-manifest.json'
-    counter = 1
-    if manifest_path.exists():
-        try:
-            with open(manifest_path, 'r', encoding='utf-8') as f:
-                prev = json.load(f)
-            prev_version = prev.get('plants_version', '')
-            if prev_version.startswith(date_prefix):
-                parts = prev_version.split('-')
-                if len(parts) == 2 and parts[1].isdigit():
-                    counter = int(parts[1]) + 1
-        except Exception:
-            pass
-    return f"{date_prefix}-{counter:02d}"
+def build_version() -> str:
+    """Génère une version au format YYYY.MM.DD-HH (heure UTC, déterministe)"""
+    return datetime.now(timezone.utc).strftime("%Y.%m.%d-%H")
 
 
-def write_version_manifest(version: str, commit: str, generated_at: str):
-    """Génère version-manifest.json dans APP_DATA_DIR"""
+def write_manifest(app_version: str, plants_version: str, commit: str) -> dict:
+    """Génère version-manifest.json dans APP_DATA_DIR et DB_DIR"""
     manifest = {
-        'app_version':    version,
-        'plants_version': version,
-        'generated_at':   generated_at,
-        'source_commit':  commit
+        "app_version":    app_version,
+        "plants_version": plants_version,
+        "generated_at":   datetime.now(timezone.utc).isoformat(),
+        "source_commit":  commit,
+        "build_id":       f"bloom-{app_version.replace('.', '').replace('-', '-')}"
     }
-    path = APP_DATA_DIR / 'version-manifest.json'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
-    print(f"[OK] version-manifest.json écrit : {path}")
+    for dest in [APP_DATA_DIR, DB_DIR]:
+        out = dest / "version-manifest.json"
+        out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"[OK] version-manifest.json écrit : {out}")
     return manifest
 
 
-def write_app_version_js(version: str, commit: str, generated_at: str):
+def write_app_version_js(app_version: str, plants_version: str, commit: str, build_id: str, generated_at: str):
     """Génère app-version.js exposant window.BloomVersion"""
     content = f"""/**
- * app-version.js
- * Bloom by BotaniK — Version globale de l'application
- *
- * Ce fichier est AUTOMATIQUEMENT GÉNÉRÉ par publish_app_bundle.py
+ * app-version.js — AUTOMATIQUEMENT GÉNÉRÉ par publish_app_bundle.py
  * Ne pas modifier manuellement.
- *
- * Exposé en window.BloomVersion pour être accessible
- * avant le chargement des modules ES.
  */
-
 window.BloomVersion = {{
-  app_version: "{version}",
-  plants_version: "{version}",
+  app_version: "{app_version}",
+  plants_version: "{plants_version}",
   generated_at: "{generated_at}",
-  source_commit: "{commit}"
+  source_commit: "{commit}",
+  build_id: "{build_id}"
 }};
-
-// Log de diagnostic (désactivable en prod)
 if (typeof console !== 'undefined') {{
-  console.info(
-    `[BloomVersion] app=${{window.BloomVersion.app_version}}`,
-    `plants=${{window.BloomVersion.plants_version}}`,
-    `commit=${{window.BloomVersion.source_commit}}`
-  );
+  console.info('[BloomVersion]', window.BloomVersion);
 }}
 """
-    path = APP_DATA_DIR / 'app-version.js'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    path = APP_DATA_DIR / "app-version.js"
+    path.write_text(content, encoding="utf-8")
     print(f"[OK] app-version.js écrit : {path}")
 
 
 def load_plants() -> list:
-    """Charge et valide plants.json"""
-    if not PLANTS_JSON.exists():
-        print(f"[ERROR] plants.json introuvable : {PLANTS_JSON}", file=sys.stderr)
+    """Charge plants.json depuis DB_DIR"""
+    src = DB_DIR / "plants.json"
+    if not src.exists():
+        print(f"[ERROR] plants.json introuvable : {src}", file=sys.stderr)
         sys.exit(1)
-    with open(PLANTS_JSON, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    # Normaliser : accepter liste ou dict { plants: [] }
+    data = json.loads(src.read_text(encoding="utf-8"))
     if isinstance(data, list):
         plants = data
-    elif isinstance(data, dict) and 'plants' in data:
-        plants = data['plants']
+    elif isinstance(data, dict) and "plants" in data:
+        plants = data["plants"]
     else:
         print("[ERROR] Format plants.json non reconnu.", file=sys.stderr)
         sys.exit(1)
-    print(f"[OK] {len(plants)} plantes chargées depuis {PLANTS_JSON}")
+    print(f"[OK] {len(plants)} plantes chargées depuis {src}")
     return plants
 
 
 def validate_plant(plant: dict, idx: int) -> dict:
-    """Valide et complète les champs manquants d'une fiche plante"""
-    required = ['nom', 'resume_bloom']
-    for field in required:
+    """Valide et complète une fiche plante"""
+    for field in ["nom", "resume_bloom"]:
         if not plant.get(field):
-            print(f"[WARNING] Plante #{idx} manque le champ '{field}' : {plant.get('nom', '?')}")
-    # Générer un id si absent
-    if not plant.get('id'):
-        plant['id'] = plant.get('nom', f'plante_{idx}').lower().replace(' ', '-')
-    # S'assurer que categories est une liste
-    if not isinstance(plant.get('categories'), list):
-        plant['categories'] = []
-    # S'assurer que les listes sont bien des listes
-    for field in ['bienfaits', 'precautions', 'synergie']:
+            print(f"[WARNING] Plante #{idx} manque '{field}' : {plant.get('nom', '?')}")
+    if not plant.get("id"):
+        plant["id"] = plant.get("nom", f"plante_{idx}").lower().replace(" ", "-")
+    if not isinstance(plant.get("categories"), list):
+        plant["categories"] = []
+    for field in ["bienfaits", "precautions", "synergie"]:
         if not isinstance(plant.get(field), list):
             plant[field] = []
-    # Ajouter le statut par défaut
-    if not plant.get('statut'):
-        plant['statut'] = 'validated'
+    if not plant.get("statut"):
+        plant["statut"] = "validated"
     return plant
 
 
 def build_index(plants: list) -> list:
-    """Génère un index léger pour la recherche rapide"""
+    """Génère un index léger"""
     return [
         {
-            'id': p.get('id', ''),
-            'nom': p.get('nom', ''),
-            'nom_latin': p.get('nom_latin', ''),
-            'categories': p.get('categories', []),
-            'resume_bloom': p.get('resume_bloom', '')[:150]  # tronquer pour l'index
+            "id":           p.get("id", ""),
+            "nom":          p.get("nom", ""),
+            "nom_latin":    p.get("nom_latin", ""),
+            "categories":   p.get("categories", []),
+            "resume_bloom": p.get("resume_bloom", "")[:150]
         }
         for p in plants
     ]
@@ -177,33 +138,29 @@ def build_index(plants: list) -> list:
 def write_json(path: Path, data, label: str):
     """Ecrit un fichier JSON propre"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[OK] {label} écrit : {path}")
 
 
-def write_log(plants_count: int, published: bool, errors: list, version: str):
-    """Met à jour le journal de publication"""
+def write_log(plants_count: int, errors: list, version: str, build_id: str):
+    """Journalise la publication"""
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    status = 'ok' if published and not errors else 'warning'
-    entry = f"""
+    ts     = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    status = "ok" if not errors else "warning"
+    entry  = f"""
 ---
 ## Publication App Bibliothèque — {ts}
 | Champ | Valeur |
 |-------|--------|
 | Status | {status} |
 | Version | {version} |
+| Build ID | {build_id} |
 | Plantes publiées | {plants_count} |
 | Erreurs | {len(errors)} |
-| Source | {PLANTS_JSON} |
-| Destination | {APP_DATA_DIR} |
 """
     if errors:
-        entry += "\n### Erreurs\n"
-        for e in errors:
-            entry += f"- {e}\n"
-    with open(LOG_PATH, 'a', encoding='utf-8') as f:
+        entry += "\n### Erreurs\n" + "\n".join(f"- {e}" for e in errors) + "\n"
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
         f.write(entry)
     print(f"[OK] Log mis à jour : {LOG_PATH}")
 
@@ -214,16 +171,18 @@ def main():
     print("=" * 60)
     errors = []
 
-    # 0. Calcul de la version et du commit
-    version      = build_version_string()
-    commit       = get_git_commit()
-    generated_at = datetime.now().astimezone().isoformat(timespec='seconds')
-    print(f"[OK] Version du build : {version} | commit : {commit}")
+    # 0. Version + commit
+    app_version    = build_version()
+    plants_version = app_version
+    commit         = git_short_sha()
+    generated_at   = datetime.now(timezone.utc).isoformat()
+    build_id       = f"bloom-{app_version.replace('.', '').replace('-', '-')}"
+    print(f"[OK] Version : {app_version} | commit : {commit} | build : {build_id}")
 
     # 1. Charger les plantes
     plants = load_plants()
 
-    # 2. Valider et enrichir
+    # 2. Valider
     validated = []
     for i, plant in enumerate(plants):
         try:
@@ -234,29 +193,26 @@ def main():
             print(f"[ERROR] {err}", file=sys.stderr)
     print(f"[OK] {len(validated)} plantes validées ({len(errors)} erreur(s))")
 
-    # 3. Copier plants.json complet dans l'app
-    dest_plants = APP_DATA_DIR / 'plants.json'
-    write_json(dest_plants, validated, 'plants.json complet')
+    # 3. Copier plants.json
+    write_json(APP_DATA_DIR / "plants.json", validated, "plants.json")
 
-    # 4. Générer l'index léger
-    index = build_index(validated)
-    dest_index = APP_DATA_DIR / 'plants-index.json'
-    write_json(dest_index, index, 'plants-index.json')
+    # 4. Générer l'index
+    write_json(APP_DATA_DIR / "plants-index.json", build_index(validated), "plants-index.json")
 
-    # 5. Générer version-manifest.json
-    write_version_manifest(version, commit, generated_at)
+    # 5. Générer version-manifest.json (app + db)
+    manifest = write_manifest(app_version, plants_version, commit)
 
     # 6. Générer app-version.js
-    write_app_version_js(version, commit, generated_at)
+    write_app_version_js(app_version, plants_version, commit, build_id, generated_at)
 
-    # 7. Rapport
-    write_log(len(validated), True, errors, version)
+    # 7. Log
+    write_log(len(validated), errors, app_version, build_id)
 
     print("=" * 60)
-    print(f"[DONE] {len(validated)} plantes publiées dans {APP_DATA_DIR} (v{version})")
+    print(f"[DONE] {len(validated)} plantes publiées (v{app_version} / {build_id})")
     print("=" * 60)
     return 1 if errors else 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())
