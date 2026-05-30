@@ -1,0 +1,115 @@
+# =================================================================
+# 06_publish_app.yml
+# Bloom by BotaniK — Workflow de publication de l'App Bibliothèque
+# =================================================================
+#
+# Déclencheurs :
+#   - push sur 03_BASE_DE_DONNEES/plants.json (mise à jour des données)
+#   - push sur 06_APP_BIBLIOTHEQUE/** (mise à jour du code app)
+#   - workflow_dispatch (déclenchement manuel)
+#
+# Ce workflow :
+#   1. Valide l'existence de plants.json
+#   2. Exécute publish_app_bundle.py pour injecter les données dans l'app
+#   3. Commit le bundle mis à jour dans 06_APP_BIBLIOTHEQUE/data/
+#   4. Écrit un résumé dans GITHUB_STEP_SUMMARY
+#
+# =================================================================
+
+name: 06_publish_app
+
+on:
+  push:
+    paths:
+      - '03_BASE_DE_DONNEES/plants.json'
+      - '06_APP_BIBLIOTHEQUE/**'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Forcer le rebuild même sans changement'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+env:
+  PLANTS_JSON: 03_BASE_DE_DONNEES/plants.json
+  APP_DATA_DIR: 06_APP_BIBLIOTHEQUE/data
+  SCRIPTS_DIR: 05_AUTOMATION/scripts
+  LOG_PATH: 07_LOGS/app_publish_log.md
+
+jobs:
+  publish_app:
+    name: Publier le bundle App Bibliothèque
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vérifier l'existence de plants.json
+        id: check_data
+        run: |
+          if [ ! -f "$PLANTS_JSON" ]; then
+            echo "status=missing" >> $GITHUB_OUTPUT
+            echo "::warning::plants.json introuvable dans $PLANTS_JSON"
+          else
+            COUNT=$(python3 -c "import json,sys; d=json.load(open('$PLANTS_JSON')); print(len(d) if isinstance(d,list) else len(d.get('plants',[])))") 2>/dev/null || COUNT=0
+            echo "status=ok" >> $GITHUB_OUTPUT
+            echo "count=$COUNT" >> $GITHUB_OUTPUT
+            echo "::notice::plants.json trouvé — $COUNT plantes"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dépendances Python
+        run: |
+          pip install --quiet anthropic python-dotenv
+
+      - name: Créer le dossier data si absent
+        run: mkdir -p $APP_DATA_DIR
+
+      - name: Injecter plants.json dans l'app (publish_app_bundle.py)
+        id: publish
+        run: |
+          if [ -f "$SCRIPTS_DIR/publish_app_bundle.py" ]; then
+            python3 $SCRIPTS_DIR/publish_app_bundle.py
+            echo "published=true" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::publish_app_bundle.py absent — copie directe de plants.json"
+            cp $PLANTS_JSON $APP_DATA_DIR/plants.json
+            echo "published=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit du bundle mis à jour
+        if: steps.publish.outputs.published == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add $APP_DATA_DIR/
+          if git diff --staged --quiet; then
+            echo "Aucun changement à committer."
+          else
+            git commit -m "chore: mise à jour bundle app — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            git push
+          fi
+
+      - name: Résumé du workflow
+        if: always()
+        run: |
+          echo "## App Bibliothèque — Rapport de publication" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Champ | Valeur |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.publish.outputs.published == 'true' && 'ok' || 'warning' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Plantes dans plants.json | ${{ steps.check_data.outputs.count || '?' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Date | $(date -u '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branche | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Déclenché par | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
